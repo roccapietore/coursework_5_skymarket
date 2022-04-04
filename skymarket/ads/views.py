@@ -19,7 +19,6 @@ class AdViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        breakpoint()
         serializer.save(author=user)
 
     def get_serializer_class(self):
