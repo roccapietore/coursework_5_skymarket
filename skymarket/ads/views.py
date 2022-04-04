@@ -2,43 +2,64 @@ from datetime import timezone
 from rest_framework import pagination, viewsets
 from ads.models import Ad, Comment
 from ads.serializers import AdSerializer, AdCreateSerializer, AdDetailSerializer, CommentSerializer
+from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
-from ads.permissions import IsUser, IsOwnerPermission
+
+from ads.permissions import IsUser, IsOwner, IsAdmin
+
+
+class AdPagination(pagination.PageNumberPagination):
+    page_size = 4
 
 
 class AdViewSet(viewsets.ModelViewSet):
     queryset = Ad.objects.all()
-    serializer_class = AdDetailSerializer
+    serializer_class = AdSerializer
+    pagination_class = AdPagination
 
-    def create(self, request, *args, **kwargs):
-        self.serializer_class = AdCreateSerializer
-        return super().create(request, *args, **kwargs)
+    def perform_create(self, serializer):
+        user = self.request.user
+        breakpoint()
+        serializer.save(author=user)
+
+    def get_serializer_class(self):
+        if self.action in ["retrieve", "create", "update", "partial_update", "destroy"]:
+            return AdDetailSerializer
+        return AdSerializer
 
     def get_permissions(self):
-        permissions = []
-        if self.action == "list":
-            permissions = [AllowAny]
-        elif self.action in ["retrieve", "create", "me"]:
-            permissions = [IsAuthenticated]
-        elif self.action in ["update", "partial_update", "destroy"]:
-            permissions = [IsAuthenticated, (IsOwnerPermission and IsUser) | IsAdminUser]
-        return [permission() for permission in permissions]
+        permission_classes = (AllowAny,)
+        if self.action == "retrieve":
+            permission_classes = (IsUser,)
+        elif self.action in ["create", "update", "partial_update", "destroy", "me"]:
+            permission_classes = (IsOwner | IsAdmin,)
+        return tuple(permission() for permission in permission_classes)
+
+    def get_queryset(self):
+        if self.action == "me":
+            return Ad.objects.filter(author=self.request.user).all()
+        return Ad.objects.all()
 
 
 class CommentViewSet(viewsets.ModelViewSet):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
 
-    def list(self, request, *args, **kwargs):
-        self.queryset = Comment.objects.all().filter(ad=kwargs["ad_pk"])
-        return super().list(request, *args, **kwargs)
+    def perform_create(self, serializer):
+        ad_id = self.kwargs.get("ad_pk")
+        ad_instance = get_object_or_404(Ad, id=ad_id)
+        user = self.request.user
+        serializer.save(author=user, ad=ad_instance)
+
+    def get_queryset(self):
+        ad_id = self.kwargs.get("ad_pk")
+        ad_instance = get_object_or_404(Ad, id=ad_id)
+        return ad_instance.comments.all()
 
     def get_permissions(self):
-        permissions = []
+        permission_classes = ()
         if self.action in ["list", "retrieve", "create", "me"]:
-            permissions = [IsAuthenticated]
+            permission_classes = (IsUser,)
         elif self.action in ["update", "partial_update", "destroy"]:
-            permissions = [IsAuthenticated, (IsOwnerPermission and IsUser) | IsAdminUser]
-        return [permission() for permission in permissions]
-
-
+            permission_classes = (IsOwner | IsAdmin,)
+        return tuple(permission() for permission in permission_classes)
